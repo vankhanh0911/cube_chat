@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(yarn create:*)",
+      "Bash(yarn:*)",
+      "Bash(apply_patch:*)",
+      "Bash(cat:*)",
+      "Bash(backend/package.json:*)",
+      "Bash(backend/tsconfig.json:*)",
+      "Bash(backend/src/db.ts:*)",
+      "Bash(backend/src/types.ts:*)",
+      "Bash(backend/src/repo.ts:*)",
+      "Bash(frontend/.env.local.example:*)",
+      "WebFetch(domain:cube.dev)",
+      "Bash(npm install)",
+      "Bash(npm install:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
