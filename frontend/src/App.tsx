@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import embed from "vega-embed";
-import type { VisualizationSpec } from "vega-lite";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+  type JSX,
+} from "react";
+import embed, { type VisualizationSpec } from "vega-embed";
 import "./App.css";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
@@ -237,10 +243,11 @@ function App() {
                 const updated = [...prev];
                 const last = updated[updated.length - 1];
                 if (last && last.role === "assistant") {
+                  const content = evt.content as string;
                   const chunks = [...(last.assistantChunks || [])];
-                  chunks.push(evt.content);
+                  chunks.push(content);
                   const segments = [...(last.segments || [])];
-                  segments.push({ type: "text", value: evt.content });
+                  segments.push({ type: "text", value: content });
                   updated[updated.length - 1] = {
                     ...last,
                     content: chunks.join(""),
@@ -367,7 +374,7 @@ function App() {
             } else if (evt.type === "done" && evt.messages) {
               setConversationId(evt.conversationId || conversationId);
               // normalize assistant messages to include chunks/steps/arrays from metadata if present
-              const normalized = evt.messages.map((m) => {
+              evt.messages.map((m) => {
                 if (m.role !== "assistant") return m;
                 const meta = m.metadata || {};
                 return {
@@ -444,17 +451,12 @@ function App() {
   };
 
   const renderVega = useCallback(
-    async (
-      spec: unknown,
-      container: HTMLDivElement | null,
-      dataset?: Record<string, any[]>,
-    ) => {
+    async (spec: unknown, container: HTMLDivElement | null) => {
       if (!container || !spec) return;
       try {
         await embed(container, spec as VisualizationSpec, {
           actions: false,
           renderer: "canvas",
-          datasets: dataset,
         });
       } catch (err) {
         console.warn("Failed to render vega", err);
@@ -497,7 +499,7 @@ function App() {
                   {c.title || "Untitled"}
                 </div>
                 <div className="conversation-meta">
-                  <span>{c.lastMessage || "—"}</span>
+                  {/*<span>{c.lastMessage || "—"}</span>*/}
                   {c.lastTimestamp && (
                     <span>{formatDate(c.lastTimestamp)}</span>
                   )}
@@ -668,9 +670,9 @@ function App() {
                                       <div className="label">Chart</div>
                                       <div
                                         className="vega-host"
-                                        ref={(el) =>
-                                          renderVega(chartSpec, el, undefined)
-                                        }
+                                        ref={(el) => {
+                                          void renderVega(chartSpec, el);
+                                        }}
                                       />
                                     </div>
                                   )}
@@ -754,7 +756,7 @@ function App() {
                         <pre>{msg.metadata.thinking}</pre>
                       </details>
                     )}
-                    {msg.metadata.toolCall && (
+                    {Boolean(msg.metadata.toolCall) && (
                       <details>
                         <summary>Tool calls</summary>
                         <pre>
@@ -762,7 +764,7 @@ function App() {
                         </pre>
                       </details>
                     )}
-                    {msg.metadata.toolCallResult && (
+                    {Boolean(msg.metadata.toolCallResult) && (
                       <details>
                         <summary>Tool results</summary>
                         <pre>
@@ -770,7 +772,7 @@ function App() {
                         </pre>
                       </details>
                     )}
-                    {msg.metadata.sqlToolCall && (
+                    {Boolean(msg.metadata.sqlToolCall) && (
                       <details>
                         <summary>SQL tool calls</summary>
                         <pre>
@@ -778,7 +780,7 @@ function App() {
                         </pre>
                       </details>
                     )}
-                    {msg.metadata.sqlToolCallResult && (
+                    {Boolean(msg.metadata.sqlToolCallResult) && (
                       <details>
                         <summary>SQL tool results</summary>
                         <pre>
@@ -790,7 +792,7 @@ function App() {
                         </pre>
                       </details>
                     )}
-                    {msg.metadata.events && (
+                    {Boolean(msg.metadata.events) && (
                       <details>
                         <summary>Raw events</summary>
                         <pre>

@@ -1,12 +1,12 @@
-import Database from 'better-sqlite3'
-import { join } from 'path'
-import { fileURLToPath } from 'url'
+import Database from "better-sqlite3";
+import { join } from "path";
+import { fileURLToPath } from "url";
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = join(__filename, '..')
-const db = new Database(join(__dirname, '..', 'data.db'))
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = join(__filename, "..");
+const db = new Database(join(__dirname, "..", "data.db"));
 
-db.pragma('journal_mode = WAL')
+db.pragma("journal_mode = WAL");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS conversations (
@@ -25,6 +25,12 @@ db.exec(`
     metadata TEXT,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id)
   );
-`)
 
-export default db
+  CREATE TABLE IF NOT EXISTS tokens (
+    external_id TEXT PRIMARY KEY,
+    token TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+`);
+
+export default db;

@@ -1,9 +1,12 @@
 import dotenv from "dotenv";
+import db from "./db.js";
 dotenv.config();
 
 const CUBE_API_BASE = process.env.CUBE_API_BASE; // e.g. https://ai-engineer.cubecloud.dev
 const CUBE_CHAT_PATH = process.env.CUBE_CHAT_PATH; // e.g. api/v1/public/antsomi/1/chat/stream-chat-state
 const CUBE_API_KEY = process.env.CUBE_API_KEY; // for session/token exchange
+
+let cachedToken: string | null = null;
 
 if (!CUBE_API_BASE || !CUBE_CHAT_PATH || !CUBE_API_KEY) {
   console.warn(
@@ -53,19 +56,6 @@ export async function exchangeToken(externalId: string) {
       body: JSON.stringify({ externalId, deploymentId: 1 }),
     },
   );
-  console.log("sessionRes", sessionRes);
-  console.log(
-    "sss",
-    `${CUBE_API_BASE.replace(/\/$/, "")}/api/v1/embed/generate-session`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Api-Key ${CUBE_API_KEY}`,
-      },
-      body: JSON.stringify({ externalId, deploymentId: 1 }),
-    },
-  );
 
   if (!sessionRes.ok) {
     throw new Error(`Session gen HTTP ${sessionRes.status}`);
@@ -91,6 +81,42 @@ export async function exchangeToken(externalId: string) {
   return tokenJson.token;
 }
 
+function readCachedToken(externalId: string) {
+  if (cachedToken) return cachedToken;
+  const row = db
+    .prepare("SELECT token FROM tokens WHERE external_id = ?")
+    .get(externalId) as { token: string } | undefined;
+  if (row?.token) {
+    cachedToken = row.token;
+    return row.token;
+  }
+  return null;
+}
+
+function writeCachedToken(externalId: string, token: string) {
+  cachedToken = token;
+  db.prepare(
+    `INSERT INTO tokens (external_id, token, created_at)
+     VALUES (?, ?, datetime('now'))
+     ON CONFLICT(external_id) DO UPDATE SET token=excluded.token, created_at=datetime('now')`,
+  ).run(externalId, token);
+}
+
+function clearCachedToken(externalId: string) {
+  cachedToken = null;
+  db.prepare("DELETE FROM tokens WHERE external_id = ?").run(externalId);
+}
+
+async function getToken(externalId: string, forceRefresh = false) {
+  if (!forceRefresh) {
+    const cached = readCachedToken(externalId);
+    if (cached) return cached;
+  }
+  const token = await exchangeToken(externalId);
+  writeCachedToken(externalId, token);
+  return token;
+}
+
 export async function sendToCube({
   chatId,
   input,
@@ -106,16 +132,28 @@ export async function sendToCube({
     throw new Error("Cube API not configured");
   }
 
-  const bearer = await exchangeToken("khanhhv@antsomi.com");
   const url = `https://ai-engineer.cubecloud.dev/${CUBE_CHAT_PATH.replace(/^\//, "")}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${bearer}`,
-    },
-    body: JSON.stringify({ chatId, input }),
-  });
+  const doRequest = async (bearer: string) => {
+    return fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${bearer}`,
+      },
+      body: JSON.stringify({ chatId, input }),
+    });
+  };
+
+  let bearer = await getToken(externalId);
+  let res = await doRequest(bearer);
+
+  // If the cached token is invalid/expired, refresh once.
+  if ((res.status === 401 || res.status === 403) && !res.ok) {
+    clearCachedToken(externalId);
+    bearer = await getToken(externalId, true);
+    res = await doRequest(bearer);
+  }
+
   if (!res.ok || !res.body) {
     throw new Error(`Cube API HTTP ${res.status}`);
   }
@@ -125,6 +163,7 @@ export async function sendToCube({
   let assistantText = "";
   let lastMetadata: any = undefined;
   let buffer = "";
+  let streamingStarted = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -139,6 +178,12 @@ export async function sendToCube({
       if (!line.trim()) continue;
       try {
         const msg = JSON.parse(line) as CubeDelta;
+        if (msg.id === "__cutoff__") {
+          // Start processing messages only after the cutoff marker (avoid replayed history).
+          streamingStarted = msg.state?.isStreaming === true;
+          continue;
+        }
+        if (!streamingStarted) continue;
         lastMetadata = mergeMeta(lastMetadata, msg);
         onDelta?.("", msg);
         if (msg.role === "assistant" && typeof msg.content === "string") {
@@ -154,11 +199,16 @@ export async function sendToCube({
   if (buffer.trim()) {
     try {
       const msg = JSON.parse(buffer) as CubeDelta;
-      lastMetadata = mergeMeta(lastMetadata, msg);
-      onDelta?.("", msg);
-      if (msg.role === "assistant" && typeof msg.content === "string") {
-        assistantText += msg.content;
-        onDelta?.(msg.content, msg);
+      if (msg.id === "__cutoff__") {
+        streamingStarted = msg.state?.isStreaming === true;
+      }
+      if (streamingStarted) {
+        lastMetadata = mergeMeta(lastMetadata, msg);
+        onDelta?.("", msg);
+        if (msg.role === "assistant" && typeof msg.content === "string") {
+          assistantText += msg.content;
+          onDelta?.(msg.content, msg);
+        }
       }
     } catch (err) {
       console.warn("Failed to parse trailing stream line", err, buffer);
