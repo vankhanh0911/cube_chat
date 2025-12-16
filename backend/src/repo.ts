@@ -1,9 +1,9 @@
 import db from './db.js'
-import { nanoid } from 'nanoid'
+import { v4 as uuidv4 } from 'uuid';
 import { MessagePayload } from './types.js'
 
 export function createConversation(userId: string, title: string | null = null) {
-  const id = nanoid()
+  const id = uuidv4()
   const stmt = db.prepare(
     "INSERT INTO conversations (id, user_id, title, created_at) VALUES (?, ?, ?, datetime('now'))"
   )
@@ -16,9 +16,9 @@ export function addMessage(
   msg: MessagePayload
 ) {
   const stmt = db.prepare(
-    'INSERT INTO messages (id, conversation_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?, ?)' 
+    'INSERT INTO messages (id, conversation_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?, ?)'
   )
-  stmt.run(nanoid(), conversationId, msg.role, msg.content, msg.timestamp, JSON.stringify(msg.metadata ?? null))
+  stmt.run(uuidv4(), conversationId, msg.role, msg.content, msg.timestamp, JSON.stringify(msg.metadata ?? null))
 }
 
 export function listConversations(userId: string) {

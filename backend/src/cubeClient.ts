@@ -53,7 +53,7 @@ export async function exchangeToken(externalId: string) {
         "Content-Type": "application/json",
         Authorization: `Api-Key ${CUBE_API_KEY}`,
       },
-      body: JSON.stringify({ externalId, deploymentId: 1 }),
+      body: JSON.stringify({ externalId, email: externalId }),
     },
   );
 
@@ -132,27 +132,38 @@ export async function sendToCube({
     throw new Error("Cube API not configured");
   }
 
-  const url = `https://ai-engineer.cubecloud.dev/${CUBE_CHAT_PATH.replace(/^\//, "")}`;
+  const url = `https://ai.gcp-us-central1.cubecloud.dev/${CUBE_CHAT_PATH.replace(/^\//, "")}`;
   const doRequest = async (bearer: string) => {
+    console.log("Bearer", url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Api-Key ${bearer}`,
+      },
+      body: JSON.stringify({ sessionSettings: {externalId: externalId, email: externalId},chatId, input }),
+    });
+
+
     return fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${bearer}`,
+        Authorization: `Api-Key ${bearer}`,
       },
-      body: JSON.stringify({ chatId, input }),
+      body: JSON.stringify({ sessionSettings: {externalId: externalId, email: externalId},chatId, input }),
     });
   };
 
-  let bearer = await getToken(externalId);
-  let res = await doRequest(bearer);
+  // let bearer = await getToken(externalId);
+  let token = CUBE_API_KEY;
+  let res = await doRequest(token);
 
   // If the cached token is invalid/expired, refresh once.
-  if ((res.status === 401 || res.status === 403) && !res.ok) {
-    clearCachedToken(externalId);
-    bearer = await getToken(externalId, true);
-    res = await doRequest(bearer);
-  }
+  // if ((res.status === 401 || res.status === 403) && !res.ok) {
+  //   clearCachedToken(externalId);
+  //   bearer = await getToken(externalId, true);
+  //   res = await doRequest(token);
+  // }
 
   if (!res.ok || !res.body) {
     throw new Error(`Cube API HTTP ${res.status}`);
@@ -167,23 +178,27 @@ export async function sendToCube({
 
   while (true) {
     const { done, value } = await reader.read();
+
     if (done) break;
     const decoded = decoder.decode(value, { stream: true });
     buffer += decoded;
 
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? ""; // keep incomplete line
-
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
         const msg = JSON.parse(line) as CubeDelta;
+
+        if (msg.role === "user") continue;
+
         if (msg.id === "__cutoff__") {
           // Start processing messages only after the cutoff marker (avoid replayed history).
           streamingStarted = msg.state?.isStreaming === true;
           continue;
         }
         if (!streamingStarted) continue;
+
         lastMetadata = mergeMeta(lastMetadata, msg);
         onDelta?.("", msg);
         if (msg.role === "assistant" && typeof msg.content === "string") {
@@ -199,10 +214,11 @@ export async function sendToCube({
   if (buffer.trim()) {
     try {
       const msg = JSON.parse(buffer) as CubeDelta;
+
       if (msg.id === "__cutoff__") {
         streamingStarted = msg.state?.isStreaming === true;
       }
-      if (streamingStarted) {
+      if (streamingStarted && msg.role !== "user") {
         lastMetadata = mergeMeta(lastMetadata, msg);
         onDelta?.("", msg);
         if (msg.role === "assistant" && typeof msg.content === "string") {
